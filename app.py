@@ -3,18 +3,6 @@ import os
 import json
 from functools import cached_property
 
-# 💡 Streamlit Cloud 환경일 때 Secrets에서 구글 키를 읽어와 임시 파일로 만들기
-if "gcp_service_account" in st.secrets:
-    # 1. Secrets에 저장된 정보를 딕셔너리로 가져오기
-    gcp_credentials = dict(st.secrets["gcp_service_account"])
-    
-    # 2. ADK가 읽을 수 있도록 백그라운드에 임시 JSON 파일 생성
-    with open("gcp_key.json", "w") as f:
-        json.dump(gcp_credentials, f)
-        
-    # 3. 구글 클라우드 공식 환경변수에 경로 연결
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "gcp_key.json"
-
 # ADK 및 GenAI 모듈
 from google.adk.agents import LlmAgent
 from google.adk.models import Gemini
@@ -23,20 +11,30 @@ from google.adk.tools import agent_tool
 from google.adk.tools.google_search_tool import GoogleSearchTool
 from google.adk.tools import url_context
 
-# 1. UI 초기 설정
-st.set_page_config(page_title="AI 헬스 매니저 (GCP Vertex AI)", layout="wide")
-st.title("🏋️‍♂️ AI 헬스 매니저 PRO")
+# 💡 [핵심 1] 에이전트를 실행시켜줄 '러너'와 '세션(기억)' 모듈 추가
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
 
-# 2. ADK 에이전트 초기화 (한 번만 로드되도록 캐싱)
+# 1. UI 초기 설정
+st.set_page_config(page_title="AI 헬스 매니저 PRO", layout="wide")
+st.title("🏋️‍♂️ AI 헬스 매니저 PRO (GCP Vertex AI)")
+
+# 2. GCP 인증 세팅
+if "gcp_service_account" in st.secrets:
+    gcp_credentials = dict(st.secrets["gcp_service_account"])
+    with open("gcp_key.json", "w") as f:
+        json.dump(gcp_credentials, f)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "gcp_key.json"
+
+# 3. 에이전트 및 러너(Runner) 초기화
 @st.cache_resource
-def get_health_agent():
-    # 유저가 제공한 클래스
+def get_health_runner():
     class GlobalGemini(Gemini):
         @cached_property
         def api_client(self) -> Client:
             return Client(vertexai=True, location="global")
 
-    # 하위 에이전트들
+    # (이전과 동일한 하위 에이전트들)
     ________google_search_agent = LlmAgent(
         name='________google_search_agent',
         model='gemini-2.5-flash',
@@ -85,7 +83,6 @@ def get_health_agent():
         tools=[url_context]
     )
 
-    # 최상위 루트 에이전트
     root_agent = LlmAgent(
         name='AI________',
         model=GlobalGemini(model='gemini-3.5-flash'),
@@ -97,31 +94,44 @@ def get_health_agent():
             agent_tool.AgentTool(agent=ai_________url_context_agent)
         ]
     )
-    return root_agent
+    
+    # 💡 [핵심 2] 에이전트를 조종할 Runner와 세션(기억) 저장소 생성 및 결합
+    sessions = InMemorySessionService()
+    runner = Runner(agent=root_agent, session_service=sessions)
+    
+    # 에이전트 대신 Runner와 세션 서비스 자체를 반환합니다.
+    return runner, sessions
 
-agent = get_health_agent()
+# 앱이 켜질 때 한 번만 Runner를 로드합니다.
+runner, sessions = get_health_runner()
 
-# 3. 대화 세션 상태 관리
+# 4. 고유 세션 ID 발급 (채팅 문맥 기억용)
+if "adk_session" not in st.session_state:
+    # Streamlit 접속자마다 고유한 ADK 대화방(세션)을 만들어줍니다.
+    st.session_state.adk_session = sessions.create_session("health_app", "user_1")
+
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "안녕하세요! 헬스 매니저입니다. 오늘 어떤 운동을 하셨나요?"}]
+    st.session_state.messages = [{"role": "assistant", "content": "안녕하세요! 엘리트 헬스 매니저입니다. 오늘 어떤 운동을 하셨나요?"}]
 
+# 5. UI 반복 로직
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 4. 사용자 입력 및 AI 응답 처리
-if user_input := st.chat_input("운동 기록을 입력하세요 (예: 데드리프트 100kg)"):
+if user_input := st.chat_input("운동 기록을 입력하세요 (예: 벤치프레스 5세트)"):
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
     with st.chat_message("assistant"):
-        with st.spinner("에이전트가 생리학적 데이터를 분석 중입니다..."):
+        with st.spinner("ADK 러너가 생리학적 데이터를 분석 중입니다..."):
             try:
-                # ADK 에이전트 실행 (대화 문맥 유지)
-                response = agent(user_input)
+                # 💡 [핵심 3] agent가 아니라 runner를 통해 세션 ID와 함께 실행합니다!
+                response = runner.run(
+                    session_id=st.session_state.adk_session.id, 
+                    user_message=user_input
+                )
                 
-                # ADK 응답 객체에서 텍스트 추출 (버전별 호환성 처리)
                 reply = response.text if hasattr(response, 'text') else str(response)
                 
                 st.markdown(reply)
