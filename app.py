@@ -2,6 +2,18 @@ import streamlit as st
 import os
 from functools import cached_property
 
+# 💡 Streamlit Cloud 환경일 때 Secrets에서 구글 키를 읽어와 임시 파일로 만들기
+if "gcp_service_account" in st.secrets:
+    # 1. Secrets에 저장된 정보를 딕셔너리로 가져오기
+    gcp_credentials = dict(st.secrets["gcp_service_account"])
+    
+    # 2. ADK가 읽을 수 있도록 백그라운드에 임시 JSON 파일 생성
+    with open("gcp_key.json", "w") as f:
+        json.dump(gcp_credentials, f)
+        
+    # 3. 구글 클라우드 공식 환경변수에 경로 연결
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "gcp_key.json"
+
 # ADK 및 GenAI 모듈
 from google.adk.agents import LlmAgent
 from google.adk.models import Gemini
