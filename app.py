@@ -119,7 +119,7 @@ if user_input := st.chat_input("운동 기록을 입력하세요 (예: 데드리
         with st.spinner("에이전트가 생리학적 데이터를 분석 중입니다..."):
             try:
                 # ADK 에이전트 실행 (대화 문맥 유지)
-                response = agent.run(user_input)
+                response = agent(user_input)
                 
                 # ADK 응답 객체에서 텍스트 추출 (버전별 호환성 처리)
                 reply = response.text if hasattr(response, 'text') else str(response)
