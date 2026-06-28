@@ -1,75 +1,117 @@
 import streamlit as st
-import pandas as pd
-from openai import OpenAI
-from streamlit_gsheets import GSheetsConnection
+import os
+from functools import cached_property
 
-# 1. 설정
-st.set_page_config(page_title="AI 헬스 매니저", layout="wide")
-st.title("🏋️‍♂️ AI 헬스 매니저 (구글 시트 연동판)")
+# ADK 및 GenAI 모듈
+from google.adk.agents import LlmAgent
+from google.adk.models import Gemini
+from google.genai import Client
+from google.adk.tools import agent_tool
+from google.adk.tools.google_search_tool import GoogleSearchTool
+from google.adk.tools import url_context
 
-# 2. 구글 시트 및 Groq 클라이언트 설정
-try:
-    # 구글 시트 연결
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    
-    # Groq API 연결
-    client = OpenAI(
-        api_key=st.secrets["OPENAI_API_KEY"],
-        base_url="https://api.groq.com/openai/v1"
+# 1. UI 초기 설정
+st.set_page_config(page_title="AI 헬스 매니저 (GCP Vertex AI)", layout="wide")
+st.title("🏋️‍♂️ AI 헬스 매니저 PRO")
+
+# 2. ADK 에이전트 초기화 (한 번만 로드되도록 캐싱)
+@st.cache_resource
+def get_health_agent():
+    # 유저가 제공한 클래스
+    class GlobalGemini(Gemini):
+        @cached_property
+        def api_client(self) -> Client:
+            return Client(vertexai=True, location="global")
+
+    # 하위 에이전트들
+    ________google_search_agent = LlmAgent(
+        name='________google_search_agent',
+        model='gemini-2.5-flash',
+        description='Agent specialized in performing Google searches.',
+        sub_agents=[],
+        instruction='Use the GoogleSearchTool to find information on the web.',
+        tools=[GoogleSearchTool()]
     )
-except Exception as e:
-    st.error(f"설정 오류가 발생했습니다. Secrets 설정을 확인해주세요: {e}")
-    st.stop()
+    
+    ________url_context_agent = LlmAgent(
+        name='________url_context_agent',
+        description='Agent specialized in fetching content from URLs.',
+        model='gemini-2.5-flash',
+        sub_agents=[],
+        instruction='Use the UrlContextTool to retrieve content from provided URLs.',
+        tools=[url_context]
+    )
+    
+    agent__ = LlmAgent(
+        name='agent__',
+        model='gemini-2.5-flash',
+        description='',
+        sub_agents=[],
+        instruction='',
+        tools=[
+            agent_tool.AgentTool(agent=________google_search_agent),
+            agent_tool.AgentTool(agent=________url_context_agent)
+        ]
+    )
+    
+    ai_________google_search_agent = LlmAgent(
+        name='AI_________google_search_agent',
+        model=GlobalGemini(model='gemini-3.5-flash'),
+        description='Agent specialized in performing Google searches.',
+        sub_agents=[],
+        instruction='Use the GoogleSearchTool to find information on the web.',
+        tools=[GoogleSearchTool()]
+    )
+    
+    ai_________url_context_agent = LlmAgent(
+        name='AI_________url_context_agent',
+        model=GlobalGemini(model='gemini-3.5-flash'),
+        description='Agent specialized in fetching content from URLs.',
+        sub_agents=[],
+        instruction='Use the UrlContextTool to retrieve content from provided URLs.',
+        tools=[url_context]
+    )
 
-MODEL_ID = 'llama-3.3-70b-versatile'
+    # 최상위 루트 에이전트
+    root_agent = LlmAgent(
+        name='AI________',
+        model=GlobalGemini(model='gemini-3.5-flash'),
+        description='너는 스포츠 의학 및 운동 생리학에 능통한 엘리트 AI 헬스 매니저야.',
+        sub_agents=[agent__],
+        instruction='[목표]\n사용자의 매일 운동 기록을 바탕으로 점진적 과부하와 초과회복 이론에 근거하여 다음 날의 타겟 근육과 루틴을 추천해 줘.\n\n[행동 지침]\n\n사용자가 운동 기록을 입력하면, 항상 먼저 그 노력에 대해 짧고 강렬하게 칭찬해라.\n\n대화 기록을 분석하여 최근 며칠간 자극이 덜 갔던 부위를 다음 타겟으로 설정해라.\n\n추천 근거를 생리학적 관점(예: 근육 휴식 시간, 분할법 등)에서 1~2줄로 명확하게 덧붙여라.',
+        tools=[
+            agent_tool.AgentTool(agent=ai_________google_search_agent),
+            agent_tool.AgentTool(agent=ai_________url_context_agent)
+        ]
+    )
+    return root_agent
 
-# 3. 데이터 불러오기 (초기화)
-# 구글 시트의 'Sheet1'에서 데이터를 읽어옵니다. (ttl=0은 캐시 없이 항상 최신 데이터를 읽겠다는 뜻입니다)
-if "history" not in st.session_state:
-    try:
-        existing_data = conn.read(worksheet="Sheet1", usecols=[0], ttl=0)
-        existing_data = existing_data.dropna(how="all") # 빈 줄 제거
-        st.session_state.history = existing_data.iloc[:, 0].tolist() # 리스트로 변환
-    except Exception:
-        # 시트가 비어있거나 아직 생성되지 않았을 경우 빈 리스트로 시작
-        st.session_state.history = []
+agent = get_health_agent()
 
-# 4. AI 조언 함수
-def get_ai_advice(user_input, history):
-    # 에러 방지를 위해 history의 모든 요소를 문자열로 변환하여 조인
-    history_str = "\n".join([str(x) for x in history[-5:]])
-    prompt = f"과거 기록: {history_str}\n오늘 운동: {user_input}\n위 내용을 바탕으로 피드백과 다음 루틴을 3줄로 작성해줘."
-    try:
-        response = client.chat.completions.create(
-            model=MODEL_ID,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"분석 오류: {e}"
+# 3. 대화 세션 상태 관리
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "assistant", "content": "안녕하세요! 헬스 매니저입니다. 오늘 어떤 운동을 하셨나요?"}]
 
-# 5. 화면 UI
-col1, col2 = st.columns([2, 1])
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-with col1:
-    user_input = st.chat_input("오늘의 운동을 입력하세요!")
-    if user_input:
-        # 1) 화면(세션)에 데이터 추가
-        st.session_state.history.append(user_input)
-        
-        # 2) 구글 시트에 데이터 덮어쓰기 저장 (핵심 로직!)
-        new_df = pd.DataFrame({"Workout_History": st.session_state.history})
-        conn.update(worksheet="Sheet1", data=new_df)
-        
-        with st.chat_message("user"): 
-            st.markdown(user_input)
-            
-        with st.chat_message("assistant"):
-            with st.spinner("AI 분석 및 클라우드 저장 중..."):
-                advice = get_ai_advice(user_input, st.session_state.history)
-                st.markdown(advice)
+# 4. 사용자 입력 및 AI 응답 처리
+if user_input := st.chat_input("운동 기록을 입력하세요 (예: 데드리프트 100kg)"):
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-with col2:
-    st.subheader("📋 누적 과거 기록")
-    for item in reversed(st.session_state.history):
-        st.write(f"✅ {item}")
+    with st.chat_message("assistant"):
+        with st.spinner("에이전트가 생리학적 데이터를 분석 중입니다..."):
+            try:
+                # ADK 에이전트 실행 (대화 문맥 유지)
+                response = agent.run(user_input)
+                
+                # ADK 응답 객체에서 텍스트 추출 (버전별 호환성 처리)
+                reply = response.text if hasattr(response, 'text') else str(response)
+                
+                st.markdown(reply)
+                st.session_state.messages.append({"role": "assistant", "content": reply})
+            except Exception as e:
+                st.error(f"실행 오류: {e}")
