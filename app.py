@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import json
 from functools import cached_property
 
 # 💡 Streamlit Cloud 환경일 때 Secrets에서 구글 키를 읽어와 임시 파일로 만들기
