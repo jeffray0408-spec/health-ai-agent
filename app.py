@@ -8,13 +8,15 @@ st.title("🏋️‍♂️ AI 헬스 매니저 (ChatGPT 기반)")
 
 # OpenAI 클라이언트 설정
 try:
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"]
+                   base_url="https://api.groq.com/openai/v1"
+                   )
 except:
     st.error("Secrets에서 OPENAI_API_KEY를 확인해주세요.")
     st.stop()
 
 # 모델 선택 (비용 효율적이고 빠른 모델)
-MODEL_ID = 'gpt-4o-mini'
+MODEL_ID = 'llama-3.3-70b-versatile'
 
 # 2. 세션 초기화
 if "history" not in st.session_state:
