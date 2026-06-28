@@ -97,7 +97,7 @@ def get_health_runner():
     
     # 💡 [핵심 2] 에이전트를 조종할 Runner와 세션(기억) 저장소 생성 및 결합
     sessions = InMemorySessionService()
-    runner = Runner(agent=root_agent, session_service=sessions)
+    runner = Runner(agent=root_agent, session_service=sessions, app_name="health_manager")
     
     # 에이전트 대신 Runner와 세션 서비스 자체를 반환합니다.
     return runner, sessions
