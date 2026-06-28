@@ -1,3 +1,5 @@
 streamlit
 openai
 langgraph
+st-gsheets-connection
+pandas
