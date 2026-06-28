@@ -1,5 +1,3 @@
 streamlit
-openai
-langgraph
-st-gsheets-connection
-pandas
+google-adk
+google-genai
